@@ -1,0 +1,8 @@
+google-cloud-pipeline-components==0.2.0
+kfp==1.8.9
+scikit-learn==1.0.0
+google-cloud-bigquery
+google-cloud-bigquery-storage
+google-cloud-aiplatform
+pandas
+numpy

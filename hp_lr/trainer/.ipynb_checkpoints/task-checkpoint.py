@@ -60,7 +60,8 @@ def create_dataset():
     blob.download_to_filename(TRAIN_DATA_PATH)
 
     data = pd.read_csv(TRAIN_DATA_PATH, usecols=cols)
-    # data = data.sample(frac = 0.2, random_state = 42)
+    # Si estas usando volumenes muy grnades de datos, usa un sample 
+    # If you're dealing with really big data, use a sample data = data.sample(frac = 0.2, random_state = 42)
     train_data, validation_data = tts(data, test_size=0.3)
     return train_data, validation_data
 
