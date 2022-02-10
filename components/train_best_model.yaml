@@ -1,0 +1,58 @@
+name: Train best model
+description: Entrenamiento del modelo seleccionado con los hiperparametros elegidos.
+  Combina la seleccion de algoritmo e hiperparametros, entrena y pasa el pkl como
+  componente.
+inputs:
+- {name: dataset_train, type: Dataset}
+- {name: dataset_val, type: Dataset}
+- {name: parameters, type: Artifact}
+- {name: winning_model_name, type: Artifact}
+outputs:
+- {name: model, type: Model}
+implementation:
+  container:
+    image: python:3.9
+    command:
+    - sh
+    - -c
+    - |2
+
+      if ! [ -x "$(command -v pip)" ]; then
+          python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip
+      fi
+
+      PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet     --no-warn-script-location 'pandas' 'sklearn' 'kfp==1.8.9' && "$0" "$@"
+    - sh
+    - -ec
+    - |
+      program_path=$(mktemp -d)
+      printf "%s" "$0" > "$program_path/ephemeral_component.py"
+      python3 -m kfp.v2.components.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+    - "\nimport kfp\nfrom kfp.v2 import dsl\nfrom kfp.v2.dsl import *\nfrom typing\
+      \ import *\n\ndef train_best_model(\n    dataset_train:  Input[Dataset],\n \
+      \   dataset_val: Input[Dataset],\n    model: Output[Model],\n    parameters:\
+      \ Input[Artifact],\n    winning_model_name: Input[Artifact],\n):\n\n    '''\n\
+      \    Entrenamiento del modelo seleccionado con los hiperparametros elegidos.\
+      \ Combina la seleccion de algoritmo e hiperparametros, entrena y pasa el pkl\
+      \ como componente.\n    Training of the chosen model with its hyperparameters.\
+      \ Combines the algorithm selection and training, and passes the pkl as a component.\n\
+      \n    '''\n\n    #from xgboost import XGBClassifier\n    from sklearn.ensemble\
+      \ import RandomForestClassifier\n    from sklearn.linear_model import LogisticRegression\n\
+      \    import pandas as pd\n    import pickle\n\n    # get model name and parameters\
+      \ \n\n    best_parameters = parameters.metadata\n\n    model_dict = winning_model_name.metadata\n\
+      \    WINNING_MODEL_NAME = model_dict.get('model')\n\n    # choose model and\
+      \ place parameters\n    if WINNING_MODEL_NAME == 'LogisticRegression':\n   \
+      \     best_model = LogisticRegression(**best_parameters)\n    elif WINNING_MODEL_NAME\
+      \ == 'RandomForestClassifier':\n        best_model = RandomForestClassifier(**best_parameters)\n\
+      \    else:\n        best_model = None \n\n    # get data \n\n    data_train\
+      \ = pd.read_csv(dataset_train.path+\".csv\")\n    data_val = pd.read_csv(dataset_val.path+\"\
+      .csv\")\n\n    data = pd.concat([data_train, data_val])\n\n    # train\n   \
+      \ best_model.fit(\n        data.drop(columns=[\"target\"]),\n        data.target,\n\
+      \    )\n    model.metadata[\"framework\"] = WINNING_MODEL_NAME\n\n    file_name\
+      \ = model.path + f\".pkl\"\n    with open(file_name, 'wb') as file:  \n    \
+      \    pickle.dump(best_model, file)\n\n"
+    args:
+    - --executor_input
+    - {executorInput: null}
+    - --function_to_execute
+    - train_best_model

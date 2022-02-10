@@ -1,0 +1,67 @@
+name: Model evaluation
+description: Evaluacion de modelos entrenados. Toma los modelos previamente entrenados
+  (pkls) y los evalua segun la metrica F1. El nombre del ganador y NO el modelo en
+  si mismo son pasados como componente, asi como tambien la metrica kpi deseada.
+inputs:
+- {name: val_set, type: Dataset}
+- {name: lr_chicago_model, type: Model}
+- {name: rf_chicago_model, type: Model}
+outputs:
+- {name: lr_kpi, type: Metrics}
+- {name: rf_kpi, type: Metrics}
+- {name: winning_model_name, type: Artifact}
+implementation:
+  container:
+    image: python:3.9
+    command:
+    - sh
+    - -c
+    - |2
+
+      if ! [ -x "$(command -v pip)" ]; then
+          python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip
+      fi
+
+      PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet     --no-warn-script-location 'pandas' 'sklearn' 'kfp==1.8.9' && "$0" "$@"
+    - sh
+    - -ec
+    - |
+      program_path=$(mktemp -d)
+      printf "%s" "$0" > "$program_path/ephemeral_component.py"
+      python3 -m kfp.v2.components.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+    - "\nimport kfp\nfrom kfp.v2 import dsl\nfrom kfp.v2.dsl import *\nfrom typing\
+      \ import *\n\ndef model_evaluation(\n    val_set:  Input[Dataset],\n    lr_chicago_model:\
+      \ Input[Model],\n    rf_chicago_model: Input[Model],\n    lr_kpi: Output[Metrics],\n\
+      \    rf_kpi: Output[Metrics],\n    winning_model_name: Output[Artifact],\n):\n\
+      \    '''\n    Evaluacion de modelos entrenados. Toma los modelos previamente\
+      \ entrenados (pkls) y los evalua segun la metrica F1. El nombre del ganador\
+      \ y NO el modelo en si mismo son pasados como componente, asi como tambien la\
+      \ metrica kpi deseada. \n    Evaluation of trained models. Grabs the previously\
+      \ trained models (pkls) and evaluates them according to F1 score metric. The\
+      \ name of the winner and NOT the model itself gets passed as component, as well\
+      \ as chosen kpi metrics.\n\n    '''\n\n    from sklearn.ensemble import RandomForestClassifier\n\
+      \    from sklearn.linear_model import LogisticRegression\n\n    import pandas\
+      \ as pd\n    import logging \n    import pickle\n    from sklearn.metrics import\
+      \ roc_curve, confusion_matrix, accuracy_score, f1_score\n    import json\n \
+      \   import typing\n\n    rf_model = RandomForestClassifier()\n    file_name\
+      \ = rf_chicago_model.path + \".pkl\"\n    with open(file_name, 'rb') as file:\
+      \  \n        rf_model = pickle.load(file)\n\n    lr_model = LogisticRegression()\n\
+      \    file_name = lr_chicago_model.path + \".pkl\"\n    with open(file_name,\
+      \ 'rb') as file:  \n        lr_model = pickle.load(file)\n\n    data = pd.read_csv(val_set.path+\"\
+      .csv\")\n    y_test = data.drop(columns=[\"target\"])\n    y_target=data.target\n\
+      \n\n    y_pred_rf = rf_model.predict(y_test)\n    y_pred_lr = lr_model.predict(y_test)\n\
+      \n\n    # seleccion de modelo\n    rf_f1 = f1_score(data.target, y_pred_rf.round())\n\
+      \    lr_f1 = f1_score(data.target, y_pred_lr.round())\n\n\n\n    model_dict\
+      \ = dict({lr_f1: lr_model, rf_f1: rf_model})\n\n    def model_check(val1, val2):\n\
+      \        if val1 >= val2:\n            return val1\n        else:\n        \
+      \    return val2\n\n    best_f1 = model_check(lr_f1, rf_f1)\n    best_model\
+      \ = model_dict[best_f1]\n\n\n    #xgb_kpi.log_metric(\"f1_score\", float(xgb_f1))\n\
+      \    rf_kpi.log_metric(\"f1_score\", float(rf_f1))\n    lr_kpi.log_metric(\"\
+      f1_score\", float(lr_f1))\n\n\n    winning_model_name_str = type(best_model).__name__\n\
+      \n    winning_dict = {'model': winning_model_name_str}\n\n    winning_model_name.metadata\
+      \ = winning_dict\n\n"
+    args:
+    - --executor_input
+    - {executorInput: null}
+    - --function_to_execute
+    - model_evaluation

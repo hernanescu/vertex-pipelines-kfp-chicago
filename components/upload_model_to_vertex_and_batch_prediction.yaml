@@ -1,0 +1,65 @@
+name: Upload model to vertex and batch prediction
+description: Toma el mejor modelo entrenado en formato pkl y lo convierte en un Vertex
+  Managed Model a partir del cual se realizan las predicciones en formato batch.
+inputs:
+- {name: project, type: String}
+- {name: region, type: String}
+- {name: serving_container, type: String}
+- {name: trained_model, type: Model}
+- {name: winning_model_name, type: Artifact}
+- {name: gcs_predict_source, type: String}
+- {name: gcs_predict_dest, type: String}
+implementation:
+  container:
+    image: python:3.9
+    command:
+    - sh
+    - -c
+    - |2
+
+      if ! [ -x "$(command -v pip)" ]; then
+          python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip
+      fi
+
+      PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet     --no-warn-script-location 'pandas' 'scikit-learn==1.0.0' 'google-cloud-bigquery' 'google-cloud-bigquery-storage' 'google-cloud-aiplatform' 'kfp==1.8.9' && "$0" "$@"
+    - sh
+    - -ec
+    - |
+      program_path=$(mktemp -d)
+      printf "%s" "$0" > "$program_path/ephemeral_component.py"
+      python3 -m kfp.v2.components.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+    - "\nimport kfp\nfrom kfp.v2 import dsl\nfrom kfp.v2.dsl import *\nfrom typing\
+      \ import *\n\ndef upload_model_to_vertex_and_batch_prediction(\n    project:\
+      \ str,\n    region: str,\n    serving_container: str,\n    trained_model: Input[Model],\n\
+      \    winning_model_name: Input[Artifact],\n    gcs_predict_source: str,\n  \
+      \  gcs_predict_dest: str\n\n):\n    '''\n    Toma el mejor modelo entrenado\
+      \ en formato pkl y lo convierte en un Vertex Managed Model a partir del cual\
+      \ se realizan las predicciones en formato batch.\n    Takes the trained best\
+      \ model in pkl format and uploads it to a Vertex Managed Model and uses it to\
+      \ do a batch prediction job.\n    '''\n\n    from typing import Dict, Optional,\
+      \ Sequence\n\n    from google.cloud import aiplatform\n\n    from datetime import\
+      \ datetime\n\n    model_dict = winning_model_name.metadata\n    WINNING_MODEL_NAME\
+      \ = model_dict.get('model')\n\n    TIMESTAMP =datetime.now().strftime(\"%Y%m%d%H%M%S\"\
+      )\n\n    DISPLAY_NAME = WINNING_MODEL_NAME +'-' + TIMESTAMP\n\n    MODEL_URI\
+      \ = trained_model.uri\n    MODEL_PATH = MODEL_URI[:-5] # peque\xF1o hack para\
+      \ que encuentre el directorio con el modelo\n\n    def upload_model_sample(\n\
+      \        project: str,\n        location: str,\n        display_name: str,\n\
+      \        serving_container_image_uri: str,\n        artifact_uri: Optional[str]\
+      \ = None,\n        sync: bool = True,\n    ):\n\n\n        aiplatform.init(project=project,\
+      \ location=location)\n\n        model = aiplatform.Model.upload(\n         \
+      \   display_name=display_name,\n            artifact_uri=artifact_uri,\n   \
+      \         serving_container_image_uri=serving_container,\n            sync=sync,\n\
+      \        )\n\n        model.wait()\n\n        print(model.display_name)\n  \
+      \      print(model.resource_name)\n        return model\n\n    model_test =\
+      \ upload_model_sample(\n        project = project,\n        location = region,\n\
+      \        display_name = DISPLAY_NAME,\n        serving_container_image_uri=\
+      \ serving_container,\n        artifact_uri = MODEL_PATH\n    )\n\n    batch_job\
+      \ = model_test.batch_predict(\n        job_display_name=DISPLAY_NAME,\n    \
+      \    gcs_source = gcs_predict_source,\n        instances_format=\"csv\",\n \
+      \       gcs_destination_prefix=gcs_predict_dest,\n        machine_type = 'n1-standard-16'\n\
+      \    )\n\n"
+    args:
+    - --executor_input
+    - {executorInput: null}
+    - --function_to_execute
+    - upload_model_to_vertex_and_batch_prediction

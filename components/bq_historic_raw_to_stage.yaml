@@ -1,0 +1,72 @@
+name: Bq historic raw to stage ml
+description: Toma el dataset de BigQuery establecido como el periodo historico y lo
+  procesa, colocandolo en la tabla stage_ml.
+inputs:
+- {name: project, type: String}
+- {name: region, type: String}
+- {name: bq_historic_raw_url, type: String}
+- {name: bq_historic_stage_url, type: String}
+outputs:
+- {name: Output, type: String}
+implementation:
+  container:
+    image: python:3.9
+    command:
+    - sh
+    - -c
+    - |2
+
+      if ! [ -x "$(command -v pip)" ]; then
+          python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip
+      fi
+
+      PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet     --no-warn-script-location 'pandas' 'pyarrow' 'scikit-learn==1.0.0' 'google-cloud-bigquery' 'google-cloud-bigquery-storage' 'pandas-gbq' 'google-cloud-aiplatform' 'kfp==1.8.9' && "$0" "$@"
+    - sh
+    - -ec
+    - |
+      program_path=$(mktemp -d)
+      printf "%s" "$0" > "$program_path/ephemeral_component.py"
+      python3 -m kfp.v2.components.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+    - "\nimport kfp\nfrom kfp.v2 import dsl\nfrom kfp.v2.dsl import *\nfrom typing\
+      \ import *\n\ndef bq_historic_raw_to_stage_ml(\n    project: str,\n    region:\
+      \ str,\n    bq_historic_raw_url: str,\n    bq_historic_stage_url: str,\n\n)\
+      \ -> str:\n\n    '''\n    Toma el dataset de BigQuery establecido como el periodo\
+      \ historico y lo procesa, colocandolo en la tabla stage_ml.\n    Takes the Bigquery\
+      \ Dataset established as historic and processes it, placing it in the stage_ml\
+      \ table.\n    '''\n    import pandas as pd\n    import pandas_gbq\n    import\
+      \ numpy as np\n    from google.cloud import bigquery\n    from google.cloud\
+      \ import storage\n    from google.cloud.storage import Blob\n    from google.cloud\
+      \ import aiplatform\n\n    aiplatform.init(project = project,\n            \
+      \        location = region)\n\n    ### get data from bq_source\n    bqclient\
+      \ = bigquery.Client(project = project, location = region)\n\n\n    # Download\
+      \ a table.\n    table = bigquery.TableReference.from_string(\n        bq_historic_raw_url\n\
+      \    )\n    rows = bqclient.list_rows(\n        table\n    )\n    data = rows.to_dataframe(\n\
+      \        create_bqstorage_client=True, # guarda ac\xE1\n    )\n\n    df = data[['trip_month',\
+      \ 'trip_day', 'trip_day_of_week', 'trip_hour', 'trip_seconds', 'trip_miles',\
+      \ 'payment_type', 'euclidean', 'tip_bin']]\n\n    df = df.rename(columns = {'tip_bin':'target'})\n\
+      \n    df2 = pd.get_dummies(df, columns = ['payment_type'], drop_first = True)\n\
+      \n    df2.columns = df2.columns.str.replace(' ','_')\n\n    df2.to_gbq(bq_historic_stage_url,\n\
+      \               project,\n               chunksize=None, # I have tried with\
+      \ several chunk sizes, it runs faster when it's one big chunk (at least for\
+      \ me)\n               if_exists='replace', # el default tira error, aca no queremos\
+      \ eso\n               #verbose=False\n               table_schema=[{'name':\
+      \ 'trip_month','type': 'INTEGER'},\n                             {'name': 'trip_day','type':\
+      \ 'INTEGER'},\n                             {'name': 'trip_day_of_week','type':\
+      \ 'INTEGER'},\n                             {'name': 'trip_hour','type': 'INTEGER'},\n\
+      \                             {'name': 'trip_seconds','type': 'INTEGER'},\n\
+      \                             {'name': 'trip_miles','type': 'FLOAT'},\n    \
+      \                         {'name': 'euclidean','type': 'FLOAT'},\n         \
+      \                    {'name': 'target','type': 'INTEGER'},\n               \
+      \              {'name': 'payment_type_Credit_Card','type': 'INTEGER'},\n   \
+      \                          {'name': 'payment_type_Dispute','type': 'INTEGER'},\n\
+      \                             {'name': 'payment_type_Mobile','type': 'INTEGER'},\n\
+      \                             {'name': 'payment_type_No_Charge','type': 'INTEGER'},\n\
+      \                             {'name': 'payment_type_Prcard','type': 'INTEGER'},\n\
+      \                             {'name': 'payment_type_Unknown','type': 'INTEGER'}\n\
+      \                             ]\n    )\n\n    URL_TO_GO = bq_historic_stage_url\n\
+      \n    return URL_TO_GO\n\n"
+    args:
+    - --executor_input
+    - {executorInput: null}
+    - --function_to_execute
+    - bq_historic_raw_to_stage_ml

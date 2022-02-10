@@ -1,0 +1,69 @@
+name: Get chicago data
+description: Toma los datos que se consideran historicos de la tabla de BQ y separa
+  en train, validation y test. Ademas de pasarlos como componentes del pipeline, guarda
+  una version de los datos en el bucket de stage.
+inputs:
+- {name: project, type: String}
+- {name: region, type: String}
+- {name: bq_source_url, type: String}
+- {name: stage_data_bucket, type: String}
+outputs:
+- {name: dataset_train, type: Dataset}
+- {name: dataset_val, type: Dataset}
+- {name: dataset_test, type: Dataset}
+implementation:
+  container:
+    image: python:3.9
+    command:
+    - sh
+    - -c
+    - |2
+
+      if ! [ -x "$(command -v pip)" ]; then
+          python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip
+      fi
+
+      PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet     --no-warn-script-location 'pandas' 'pyarrow' 'scikit-learn==1.0.0' 'google-cloud-bigquery' 'google-cloud-bigquery-storage' 'kfp==1.8.9' && "$0" "$@"
+    - sh
+    - -ec
+    - |
+      program_path=$(mktemp -d)
+      printf "%s" "$0" > "$program_path/ephemeral_component.py"
+      python3 -m kfp.v2.components.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+    - "\nimport kfp\nfrom kfp.v2 import dsl\nfrom kfp.v2.dsl import *\nfrom typing\
+      \ import *\n\ndef get_chicago_data(\n    project: str,\n    region: str,\n \
+      \   bq_source_url: str,\n    stage_data_bucket: str,\n    dataset_train: Output[Dataset],\n\
+      \    dataset_val: Output[Dataset],\n    dataset_test: Output[Dataset] \n):\n\
+      \    '''\n    Toma los datos que se consideran historicos de la tabla de BQ\
+      \ y separa en train, validation y test. Ademas de pasarlos como componentes\
+      \ del pipeline, guarda una version de los datos en el bucket de stage.\n   \
+      \ Takes the data considered as historic from the BQ table and splits it into\
+      \ train, validation and test. Besides passing them as pipeline component, it\
+      \ stores a version of the data in the stage bucket.\n    '''\n    import pandas\
+      \ as pd\n    import numpy as np\n    from sklearn.model_selection import train_test_split\
+      \ as tts\n    from google.cloud import bigquery\n    from google.cloud import\
+      \ storage\n    from google.cloud.storage import Blob\n\n    TRAIN_DATA_PATH\
+      \ = 'chicago_taxi_train.csv'\n    VAL_DATA_PATH = 'chicago_taxi_val.csv'\n \
+      \   TEST_DATA_PATH = 'chicago_taxi_test.csv'\n\n    ### get data from bq_source\n\
+      \    bqclient = bigquery.Client(project = project, location = region)\n\n\n\
+      \    # Download tje table.\n    table = bigquery.TableReference.from_string(\n\
+      \        bq_source_url\n    )\n    rows = bqclient.list_rows(\n        table,\n\
+      \n    )\n    data = rows.to_dataframe(\n        create_bqstorage_client=True,\
+      \ # guarda ac\xE1\n    )\n\n    # splits in train, val and test\n\n    train,\
+      \ test = tts(data, test_size=0.3)\n    train_data, val_data = tts(train, test_size\
+      \ = 0.2)\n\n    train_data.to_csv(TRAIN_DATA_PATH)\n    val_data.to_csv(VAL_DATA_PATH)\n\
+      \    test.to_csv(TEST_DATA_PATH)\n\n    ### so far we have the paths, we have\
+      \ to upload them to the bucket / hasta aca est\xE1n los csvs en los PATH\n \
+      \   gcsclient = storage.Client() \n    bucket = gcsclient.get_bucket(stage_data_bucket)\n\
+      \n    blob_train = bucket.blob(TRAIN_DATA_PATH)\n    blob_train.upload_from_filename(TRAIN_DATA_PATH)\n\
+      \n    blob_train = bucket.blob(VAL_DATA_PATH)\n    blob_train.upload_from_filename(VAL_DATA_PATH)\n\
+      \n    blob_test = bucket.blob(TEST_DATA_PATH)\n    blob_test.upload_from_filename(TEST_DATA_PATH)\n\
+      \n    train_data.to_csv(dataset_train.path + \".csv\" , index=False, encoding='utf-8-sig')\n\
+      \    val_data.to_csv(dataset_val.path + \".csv\" , index=False, encoding='utf-8-sig')\n\
+      \    test.to_csv(dataset_test.path + \".csv\" , index=False, encoding='utf-8-sig')\n\
+      \n"
+    args:
+    - --executor_input
+    - {executorInput: null}
+    - --function_to_execute
+    - get_chicago_data

@@ -1,0 +1,64 @@
+name: Best model evaluation
+description: Toma el mejor modelo entrenado y lo evalua usando el set de test. Si
+  pasa un cierto umbral, devuelve "true" y marca el inicio del proximo paso, si no
+  lo hace, el proceso se detiene.
+inputs:
+- {name: test_set, type: Dataset}
+- {name: winning_model_name, type: Artifact}
+- {name: best_model, type: Model}
+- {name: threshold, type: Float}
+outputs:
+- {name: best_model_kpi, type: Metrics}
+- {name: dep_decision, type: String}
+implementation:
+  container:
+    image: python:3.9
+    command:
+    - sh
+    - -c
+    - |2
+
+      if ! [ -x "$(command -v pip)" ]; then
+          python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip
+      fi
+
+      PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet     --no-warn-script-location 'pandas' 'sklearn' 'kfp==1.8.9' && "$0" "$@"
+    - sh
+    - -ec
+    - |
+      program_path=$(mktemp -d)
+      printf "%s" "$0" > "$program_path/ephemeral_component.py"
+      python3 -m kfp.v2.components.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+    - "\nimport kfp\nfrom kfp.v2 import dsl\nfrom kfp.v2.dsl import *\nfrom typing\
+      \ import *\n\ndef best_model_evaluation(\n    test_set:  Input[Dataset],\n \
+      \   winning_model_name: Input[Artifact], # tiene que saber qu\xE9 objeto instanciar\
+      \ adentro\n    best_model: Input[Model], # y ac\xE1 tomar los datos para cargarlo\n\
+      \    best_model_kpi: Output[Metrics],\n    threshold: float\n)-> NamedTuple(\"\
+      Outputs\", [(\"dep_decision\", str)]):\n\n    '''\n    Toma el mejor modelo\
+      \ entrenado y lo evalua usando el set de test. Si pasa un cierto umbral, devuelve\
+      \ \"true\" y marca el inicio del proximo paso, si no lo hace, el proceso se\
+      \ detiene.\n    Takes the trained best model and evaluates it using the test\
+      \ set. If it passes a certain threshold, it returns \"true\" and sets the beginning\
+      \ of the next step, if it doesn't, the process halts.\n\n    '''\n\n\n    #from\
+      \ xgboost import XGBClassifier\n    from sklearn.ensemble import RandomForestClassifier\n\
+      \    from sklearn.linear_model import LogisticRegression\n    import pandas\
+      \ as pd\n    import logging \n    import pickle\n    from sklearn.metrics import\
+      \ roc_curve, confusion_matrix, accuracy_score, f1_score\n    import json\n \
+      \   import typing\n\n    model_dict = winning_model_name.metadata\n    WINNING_MODEL_NAME\
+      \ = model_dict.get('model')\n\n    #TIMESTAMP =datetime.now().strftime(\"%Y%m%d%H%M%S\"\
+      )\n\n    if WINNING_MODEL_NAME == 'LogisticRegression':\n        model = LogisticRegression()\n\
+      \    elif WINNING_MODEL_NAME == 'RandomForestClassifier':\n        model = RandomForestClassifier()\n\
+      \    else:\n        model = None \n\n\n    file_name = best_model.path + \"\
+      .pkl\"\n    with open(file_name, 'rb') as file:  \n        model = pickle.load(file)\n\
+      \n    data = pd.read_csv(test_set.path+\".csv\")\n    y_test = data.drop(columns=[\"\
+      target\"])\n    y_target=data.target\n\n\n    y_pred = model.predict(y_test)\n\
+      \n\n\n    # evaluacion de modelo \n    f1_value = f1_score(data.target, y_pred.round())\n\
+      \n    # toma decision\n\n    if f1_value >= threshold:\n        dep_decision\
+      \ = 'true'\n    else:\n        dep_decision = 'false'\n\n    # guarda la metrica\n\
+      \    best_model_kpi.log_metric(\"f1_score\", float(f1_value))\n\n    return\
+      \ (dep_decision, )\n\n"
+    args:
+    - --executor_input
+    - {executorInput: null}
+    - --function_to_execute
+    - best_model_evaluation

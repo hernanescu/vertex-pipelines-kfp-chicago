@@ -1,0 +1,106 @@
+name: Best model hp tuning
+description: Tuneo de hiperparametros. Toma el nombre del modelo ganador y utiliza
+  la imagen de Docker correspondiente para lanzar un job de entrenamiento. Los hiperparametros
+  obtenidos son pasados como componentes.
+inputs:
+- {name: project, type: String}
+- {name: region, type: String}
+- {name: stage_data_bucket, type: String}
+- {name: winning_model_name, type: Artifact}
+- {name: trials, type: Integer}
+- {name: parallel_trials, type: Integer}
+outputs:
+- {name: model_spec, type: Artifact}
+- {name: kpi, type: Metrics}
+- {name: model_name, type: Metrics}
+implementation:
+  container:
+    image: python:3.9
+    command:
+    - sh
+    - -c
+    - |2
+
+      if ! [ -x "$(command -v pip)" ]; then
+          python3 -m ensurepip || python3 -m ensurepip --user || apt-get install python3-pip
+      fi
+
+      PIP_DISABLE_PIP_VERSION_CHECK=1 python3 -m pip install --quiet     --no-warn-script-location 'pandas' 'scikit-learn==1.0.0' 'google-cloud-bigquery' 'google-cloud-bigquery-storage' 'google-cloud-aiplatform' 'kfp==1.8.9' && "$0" "$@"
+    - sh
+    - -ec
+    - |
+      program_path=$(mktemp -d)
+      printf "%s" "$0" > "$program_path/ephemeral_component.py"
+      python3 -m kfp.v2.components.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
+    - "\nimport kfp\nfrom kfp.v2 import dsl\nfrom kfp.v2.dsl import *\nfrom typing\
+      \ import *\n\ndef best_model_hp_tuning(\n    project: str,\n    region: str,\n\
+      \    stage_data_bucket: str,\n    winning_model_name: Input[Artifact],\n   \
+      \ model_spec: Output[Artifact],\n    trials: int,\n    parallel_trials: int,\n\
+      \    kpi: Output[Metrics],\n    model_name: Output[Metrics] \n): \n    '''\n\
+      \    Tuneo de hiperparametros. Toma el nombre del modelo ganador y utiliza la\
+      \ imagen de Docker correspondiente para lanzar un job de entrenamiento. Los\
+      \ hiperparametros obtenidos son pasados como componentes.\n    Hyperparameter\
+      \ tuning. Takes the name of the winning model and uses the corresponding Docker\
+      \ image to launch a training job. The chosen hyperparameters are passed as a\
+      \ component.\n    '''\n    from google.cloud import aiplatform\n    from google.cloud.aiplatform\
+      \ import hyperparameter_tuning as hpt\n    from google.protobuf.json_format\
+      \ import MessageToDict\n    import pandas as pd\n\n    aiplatform.init(project\
+      \ = project,\n                    location = region)\n\n    # train images definition\n\
+      \    RF_HP_IMAGE = \"gcr.io/vertex-testing-327520/rf_hp_job:v1\"\n    LR_HP_IMAGE\
+      \ = \"gcr.io/vertex-testing-327520/lr_hp_job:v1\"\n\n    # get model name\n\
+      \    model_dict = winning_model_name.metadata\n\n    WINNING_MODEL_NAME = model_dict.get('model')\n\
+      \n    from datetime import datetime\n\n    TIMESTAMP =datetime.now().strftime(\"\
+      %Y%m%d%H%M%S\")\n\n    if WINNING_MODEL_NAME == 'LogisticRegression':\n    \
+      \    WINNING_MODEL_IMAGE = LR_HP_IMAGE\n    elif WINNING_MODEL_NAME == 'RandomForestClassifier':\n\
+      \        WINNING_MODEL_IMAGE = RF_HP_IMAGE\n    else:\n        WINNING_MODEL_IMAGE\
+      \ = None \n\n    worker_pool_specs = [{\n    \"machine_spec\": {\n        \"\
+      machine_type\": \"n1-standard-8\",\n        #\"accelerator_type\": \"NVIDIA_TESLA_T4\"\
+      ,\n        #\"accelerator_count\": 1\n    },\n    \"replica_count\": 1,\n  \
+      \  \"container_spec\": {\n        \"image_uri\": WINNING_MODEL_IMAGE\n    }\n\
+      \    }]\n\n\n    metric_spec={'f1_score':'maximize'}\n\n    # Dictionary representing\
+      \ parameters to optimize.\n    # The dictionary key is the parameter_id, which\
+      \ is passed into your training\n    # job as a command line argument,\n    #\
+      \ And the dictionary value is the parameter specification of the metric.\n\n\
+      \    lr_parameter_spec = {\n        \"penalty\": hpt.CategoricalParameterSpec(values=['l1',\
+      \ 'l2']),\n        \"C\": hpt.DoubleParameterSpec(min=0.001, max=1, scale=\"\
+      log\"),\n        \"solver\": hpt.CategoricalParameterSpec(values=['saga', 'liblinear'])\n\
+      \    }\n\n    rf_parameter_spec = {\n        \"max_leaf_nodes\": hpt.DiscreteParameterSpec(values=[4,\
+      \ 8, 10], scale=None),\n        \"max_depth\": hpt.DiscreteParameterSpec(values=[4,\
+      \ 8, 10], scale=None),\n        \"n_estimators\": hpt.DiscreteParameterSpec(values=[5,\
+      \ 7, 9], scale=None)\n    }\n\n\n    if WINNING_MODEL_NAME == 'LogisticRegression':\n\
+      \        parameter_spec = lr_parameter_spec\n    elif WINNING_MODEL_NAME ==\
+      \ 'RandomForestClassifier':\n        parameter_spec = rf_parameter_spec\n  \
+      \  else:\n        parameter_spec = None \n\n    DISPLAY_NAME = f\"{WINNING_MODEL_NAME}-{TIMESTAMP}\"\
+      \n\n    hp_custom_job = aiplatform.CustomJob(display_name=DISPLAY_NAME,\n  \
+      \                                       worker_pool_specs=worker_pool_specs,\n\
+      \                                         staging_bucket=f'gs://{stage_data_bucket}')\n\
+      \n\n    hp_job = aiplatform.HyperparameterTuningJob(\n        display_name=DISPLAY_NAME,\n\
+      \        custom_job=hp_custom_job,\n        metric_spec=metric_spec,\n     \
+      \   parameter_spec=parameter_spec, \n        max_trial_count=trials,\n     \
+      \   parallel_trial_count=parallel_trials\n    )\n\n    hp_job.run()\n\n    #\
+      \ helper function\n    def get_trials_as_df(trials):\n        results = []\n\
+      \        for trial in trials:\n            row = {}\n            t = MessageToDict(trial._pb)\n\
+      \            # print(t)\n            row[\"Trial ID\"], row[\"Status\"], row[\"\
+      Start time\"], row[\"End time\"] = (\n                t[\"id\"],\n         \
+      \       t[\"state\"],\n                t[\"startTime\"],\n                t.get(\"\
+      endTime\", None),\n            )\n\n            for param in t[\"parameters\"\
+      ]:\n                row[param[\"parameterId\"]] = param[\"value\"]\n\n     \
+      \       if t[\"state\"] == \"SUCCEEDED\":\n                row[\"Training step\"\
+      ] = t[\"finalMeasurement\"][\"stepCount\"]\n                for metric in t[\"\
+      finalMeasurement\"][\"metrics\"]:\n                    row[metric[\"metricId\"\
+      ]] = metric[\"value\"]\n            results.append(row)\n\n        _df = pd.DataFrame(results)\n\
+      \        return _df\n\n    df_trials = get_trials_as_df(hp_job.trials)\n\n \
+      \   # get trial id of the best run from the Trials\n    best_trial_id = df_trials.loc[df_trials[\"\
+      f1_score\"].idxmax()][\"Trial ID\"]\n    # get best run definition\n    best_run\
+      \ = df_trials[df_trials['Trial ID']==best_trial_id]\n\n    # retrieve parameters\
+      \ tuned in this run\n    param_names = []\n\n    for i in parameter_spec.keys():\n\
+      \        param_names.append(i)\n\n    best_run_to_dict = best_run[param_names]\n\
+      \    best_run_parameters = best_run_to_dict.to_dict('r')[0]\n\n    model_spec.metadata\
+      \ = best_run_parameters\n\n    kpi_acc = float(best_run['f1_score'])\n\n   \
+      \ kpi.log_metric(\"f1_score\", float(kpi_acc))\n    model_name.log_metric('model',\
+      \ WINNING_MODEL_NAME)\n\n"
+    args:
+    - --executor_input
+    - {executorInput: null}
+    - --function_to_execute
+    - best_model_hp_tuning
