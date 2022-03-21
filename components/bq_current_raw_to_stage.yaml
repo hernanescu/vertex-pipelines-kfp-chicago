@@ -46,31 +46,36 @@ implementation:
       \ a table\n    table = bigquery.TableReference.from_string(\n        bq_current_raw_url\n\
       \    )\n    rows = bqclient.list_rows(\n        table\n    )\n    data = rows.to_dataframe(\n\
       \        create_bqstorage_client=True, # guarda ac\xE1\n    )\n\n    # process\n\
-      \n    df = data[['trip_month', 'trip_day', 'trip_day_of_week', 'trip_hour',\
-      \ 'trip_seconds', 'trip_miles', 'payment_type', 'euclidean']]\n\n    df2 = pd.get_dummies(df,\
-      \ columns = ['payment_type'], drop_first = True)\n\n    df2.columns = df2.columns.str.replace('\
-      \ ','_')\n\n    # upload to bq\n\n    df2.to_gbq(bq_current_stage_url,\n   \
-      \            project,\n               chunksize=None, \n               if_exists='replace',\
-      \ # el default tira error, aca queremos que siempre reemplace\n            \
-      \   table_schema=[{'name': 'trip_month','type': 'INTEGER'},\n              \
-      \               {'name': 'trip_day','type': 'INTEGER'},\n                  \
-      \           {'name': 'trip_day_of_week','type': 'INTEGER'},\n              \
-      \               {'name': 'trip_hour','type': 'INTEGER'},\n                 \
-      \            {'name': 'trip_seconds','type': 'INTEGER'},\n                 \
-      \            {'name': 'trip_miles','type': 'FLOAT'},\n                     \
-      \        {'name': 'euclidean','type': 'FLOAT'},\n                          \
-      \   #{'name': 'target','type': 'INTEGER'}, eliminamos el target para simular\
-      \ la realidad\n                             {'name': 'payment_type_Credit_Card','type':\
-      \ 'INTEGER'},\n                             {'name': 'payment_type_Dispute','type':\
-      \ 'INTEGER'},\n                             {'name': 'payment_type_Mobile','type':\
-      \ 'INTEGER'},\n                             {'name': 'payment_type_No_Charge','type':\
-      \ 'INTEGER'},\n                             {'name': 'payment_type_Prcard','type':\
-      \ 'INTEGER'},\n                             {'name': 'payment_type_Unknown','type':\
-      \ 'INTEGER'}\n                             ]\n    )\n\n    # ponerle a la data\
-      \ tambien un timestamp\n\n\n    from datetime import datetime\n\n    TIMESTAMP\
-      \ =datetime.now().strftime(\"%Y%m%d%H%M%S\")\n\n    DATA_PATH = f\"predicted_data_{TIMESTAMP}.csv\"\
-      \n\n    df2.to_csv(DATA_PATH, index = False)\n\n    gcsclient = storage.Client()\
-      \ # tal vez vaya stage_data_bucket\n    bucket = gcsclient.get_bucket(stage_data_bucket)\n\
+      \n    # eliminamos el target para simular la realidad / eliminate target to\
+      \ simulate reality\n    df = data[['trip_month', 'trip_day', 'trip_day_of_week',\
+      \ 'trip_hour', 'trip_seconds', 'trip_miles', 'payment_type', 'euclidean']]\n\
+      \n    df2 = pd.get_dummies(df, columns = ['payment_type'], drop_first = True)\n\
+      \n    df2.columns = df2.columns.str.replace(' ','_')\n\n    # upload to bq\n\
+      \n    df2.to_gbq(bq_current_stage_url,\n               project,\n          \
+      \     chunksize=None, \n               if_exists='replace', # el default tira\
+      \ error, aca queremos que siempre reemplace / default throws error, here we\
+      \ want it to replace always\n               table_schema=[{'name': 'trip_month','type':\
+      \ 'INTEGER'},\n                             {'name': 'trip_day','type': 'INTEGER'},\n\
+      \                             {'name': 'trip_day_of_week','type': 'INTEGER'},\n\
+      \                             {'name': 'trip_hour','type': 'INTEGER'},\n   \
+      \                          {'name': 'trip_seconds','type': 'INTEGER'},\n   \
+      \                          {'name': 'trip_miles','type': 'FLOAT'},\n       \
+      \                      {'name': 'euclidean','type': 'FLOAT'},\n            \
+      \                 #{'name': 'target','type': 'INTEGER'}, eliminamos el target\
+      \ para simular la realidad / eliminate target to simulate reality\n        \
+      \                     {'name': 'payment_type_Credit_Card','type': 'INTEGER'},\n\
+      \                             {'name': 'payment_type_Dispute','type': 'INTEGER'},\n\
+      \                             {'name': 'payment_type_Mobile','type': 'INTEGER'},\n\
+      \                             {'name': 'payment_type_No_Charge','type': 'INTEGER'},\n\
+      \                             {'name': 'payment_type_Prcard','type': 'INTEGER'},\n\
+      \                             {'name': 'payment_type_Unknown','type': 'INTEGER'}\n\
+      \                             ]\n    )\n\n    # ponerle a la data tambien un\
+      \ timestamp\n    # also timestamp the data    \n\n    from datetime import datetime\n\
+      \    import os\n\n    DATA_DIR = 'batch_predict_data'\n\n    if not os.path.exists(DATA_DIR):\n\
+      \        os.mkdir(DATA_DIR)\n\n    TIMESTAMP =datetime.now().strftime(\"%Y%m%d%H%M%S\"\
+      )\n\n    DATA_NAME = f\"predicted_data_{TIMESTAMP}.csv\"\n\n    DATA_PATH =\
+      \ os.path.join(DATA_DIR, DATA_NAME)\n\n    df2.to_csv(DATA_PATH, index = False)\n\
+      \n    gcsclient = storage.Client() \n    bucket = gcsclient.get_bucket(stage_data_bucket)\n\
       \n    blob_train = bucket.blob(DATA_PATH)\n    blob_train.upload_from_filename(DATA_PATH)\n\
       \n\n    GCS_PREDICT_SOURCE = f\"gs://{stage_data_bucket}/{DATA_PATH}\"\n\n \
       \   with open(gcs_predict_source, 'w') as f:\n              f.write(GCS_PREDICT_SOURCE)\n\

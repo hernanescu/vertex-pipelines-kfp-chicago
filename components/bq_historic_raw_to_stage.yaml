@@ -41,15 +41,14 @@ implementation:
       \ = bigquery.Client(project = project, location = region)\n\n\n    # Download\
       \ a table.\n    table = bigquery.TableReference.from_string(\n        bq_historic_raw_url\n\
       \    )\n    rows = bqclient.list_rows(\n        table\n    )\n    data = rows.to_dataframe(\n\
-      \        create_bqstorage_client=True, # guarda ac\xE1\n    )\n\n    df = data[['trip_month',\
+      \        create_bqstorage_client=True, \n    )\n\n    df = data[['trip_month',\
       \ 'trip_day', 'trip_day_of_week', 'trip_hour', 'trip_seconds', 'trip_miles',\
       \ 'payment_type', 'euclidean', 'tip_bin']]\n\n    df = df.rename(columns = {'tip_bin':'target'})\n\
       \n    df2 = pd.get_dummies(df, columns = ['payment_type'], drop_first = True)\n\
       \n    df2.columns = df2.columns.str.replace(' ','_')\n\n    df2.to_gbq(bq_historic_stage_url,\n\
-      \               project,\n               chunksize=None, # I have tried with\
-      \ several chunk sizes, it runs faster when it's one big chunk (at least for\
-      \ me)\n               if_exists='replace', # el default tira error, aca no queremos\
-      \ eso\n               #verbose=False\n               table_schema=[{'name':\
+      \               project,\n               chunksize=None, \n               if_exists='replace',\
+      \ # el default tira error, aca queremos que siempre reemplace / default throws\
+      \ error, here we want it to replace always\n               table_schema=[{'name':\
       \ 'trip_month','type': 'INTEGER'},\n                             {'name': 'trip_day','type':\
       \ 'INTEGER'},\n                             {'name': 'trip_day_of_week','type':\
       \ 'INTEGER'},\n                             {'name': 'trip_hour','type': 'INTEGER'},\n\

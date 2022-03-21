@@ -6,9 +6,13 @@ inputs:
 - {name: project, type: String}
 - {name: region, type: String}
 - {name: stage_data_bucket, type: String}
+- {name: timestamp, type: String}
 - {name: winning_model_name, type: Artifact}
 - {name: trials, type: Integer}
 - {name: parallel_trials, type: Integer}
+- {name: rf_hp_image, type: String}
+- {name: lr_hp_image, type: String}
+- {name: hp_train_machine, type: String}
 outputs:
 - {name: model_spec, type: Artifact}
 - {name: kpi, type: Metrics}
@@ -34,9 +38,10 @@ implementation:
       python3 -m kfp.v2.components.executor_main                         --component_module_path                         "$program_path/ephemeral_component.py"                         "$@"
     - "\nimport kfp\nfrom kfp.v2 import dsl\nfrom kfp.v2.dsl import *\nfrom typing\
       \ import *\n\ndef best_model_hp_tuning(\n    project: str,\n    region: str,\n\
-      \    stage_data_bucket: str,\n    winning_model_name: Input[Artifact],\n   \
-      \ model_spec: Output[Artifact],\n    trials: int,\n    parallel_trials: int,\n\
-      \    kpi: Output[Metrics],\n    model_name: Output[Metrics] \n): \n    '''\n\
+      \    stage_data_bucket: str,\n    timestamp: str,\n    winning_model_name: Input[Artifact],\n\
+      \    model_spec: Output[Artifact],\n    trials: int,\n    parallel_trials: int,\n\
+      \    rf_hp_image: str,\n    lr_hp_image: str,\n    hp_train_machine: str,\n\
+      \    kpi: Output[Metrics],\n    model_name: Output[Metrics]\n): \n    '''\n\
       \    Tuneo de hiperparametros. Toma el nombre del modelo ganador y utiliza la\
       \ imagen de Docker correspondiente para lanzar un job de entrenamiento. Los\
       \ hiperparametros obtenidos son pasados como componentes.\n    Hyperparameter\
@@ -44,17 +49,19 @@ implementation:
       \ image to launch a training job. The chosen hyperparameters are passed as a\
       \ component.\n    '''\n    from google.cloud import aiplatform\n    from google.cloud.aiplatform\
       \ import hyperparameter_tuning as hpt\n    from google.protobuf.json_format\
-      \ import MessageToDict\n    import pandas as pd\n\n    aiplatform.init(project\
+      \ import MessageToDict\n    import pandas as pd\n    from google.cloud import\
+      \ storage\n    from google.cloud.storage import Blob\n    import os\n\n    HP_TRIALS_DIR\
+      \ = 'hp_trials'\n    TIMESTAMP = timestamp\n\n    HP_TRIALS_NAME = f'{TIMESTAMP}_hp_trials.csv'\n\
+      \n    if not os.path.exists(HP_TRIALS_DIR):\n        os.mkdir(HP_TRIALS_DIR)\n\
+      \n    HP_DATA_PATH = os.path.join(HP_TRIALS_DIR, HP_TRIALS_NAME)\n\n    aiplatform.init(project\
       \ = project,\n                    location = region)\n\n    # train images definition\n\
-      \    RF_HP_IMAGE = \"gcr.io/vertex-testing-327520/rf_hp_job:v1\"\n    LR_HP_IMAGE\
-      \ = \"gcr.io/vertex-testing-327520/lr_hp_job:v1\"\n\n    # get model name\n\
-      \    model_dict = winning_model_name.metadata\n\n    WINNING_MODEL_NAME = model_dict.get('model')\n\
-      \n    from datetime import datetime\n\n    TIMESTAMP =datetime.now().strftime(\"\
-      %Y%m%d%H%M%S\")\n\n    if WINNING_MODEL_NAME == 'LogisticRegression':\n    \
-      \    WINNING_MODEL_IMAGE = LR_HP_IMAGE\n    elif WINNING_MODEL_NAME == 'RandomForestClassifier':\n\
+      \    RF_HP_IMAGE = rf_hp_image\n    LR_HP_IMAGE = lr_hp_image\n\n    # get model\
+      \ name\n    model_dict = winning_model_name.metadata\n\n    WINNING_MODEL_NAME\
+      \ = model_dict.get('model')\n\n\n\n    if WINNING_MODEL_NAME == 'LogisticRegression':\n\
+      \        WINNING_MODEL_IMAGE = LR_HP_IMAGE\n    elif WINNING_MODEL_NAME == 'RandomForestClassifier':\n\
       \        WINNING_MODEL_IMAGE = RF_HP_IMAGE\n    else:\n        WINNING_MODEL_IMAGE\
       \ = None \n\n    worker_pool_specs = [{\n    \"machine_spec\": {\n        \"\
-      machine_type\": \"n1-standard-8\",\n        #\"accelerator_type\": \"NVIDIA_TESLA_T4\"\
+      machine_type\": hp_train_machine,\n        #\"accelerator_type\": \"NVIDIA_TESLA_T4\"\
       ,\n        #\"accelerator_count\": 1\n    },\n    \"replica_count\": 1,\n  \
       \  \"container_spec\": {\n        \"image_uri\": WINNING_MODEL_IMAGE\n    }\n\
       \    }]\n\n\n    metric_spec={'f1_score':'maximize'}\n\n    # Dictionary representing\
@@ -90,15 +97,18 @@ implementation:
       finalMeasurement\"][\"metrics\"]:\n                    row[metric[\"metricId\"\
       ]] = metric[\"value\"]\n            results.append(row)\n\n        _df = pd.DataFrame(results)\n\
       \        return _df\n\n    df_trials = get_trials_as_df(hp_job.trials)\n\n \
-      \   # get trial id of the best run from the Trials\n    best_trial_id = df_trials.loc[df_trials[\"\
-      f1_score\"].idxmax()][\"Trial ID\"]\n    # get best run definition\n    best_run\
-      \ = df_trials[df_trials['Trial ID']==best_trial_id]\n\n    # retrieve parameters\
-      \ tuned in this run\n    param_names = []\n\n    for i in parameter_spec.keys():\n\
-      \        param_names.append(i)\n\n    best_run_to_dict = best_run[param_names]\n\
-      \    best_run_parameters = best_run_to_dict.to_dict('r')[0]\n\n    model_spec.metadata\
-      \ = best_run_parameters\n\n    kpi_acc = float(best_run['f1_score'])\n\n   \
-      \ kpi.log_metric(\"f1_score\", float(kpi_acc))\n    model_name.log_metric('model',\
-      \ WINNING_MODEL_NAME)\n\n"
+      \   df_trials.to_csv(HP_DATA_PATH)\n\n    # get trial id of the best run from\
+      \ the Trials\n    best_trial_id = df_trials.loc[df_trials[\"f1_score\"].idxmax()][\"\
+      Trial ID\"]\n    # get best run definition\n    best_run = df_trials[df_trials['Trial\
+      \ ID']==best_trial_id]\n\n    # retrieve parameters tuned in this run\n    param_names\
+      \ = []\n\n    for i in parameter_spec.keys():\n        param_names.append(i)\n\
+      \n    best_run_to_dict = best_run[param_names]\n    best_run_parameters = best_run_to_dict.to_dict('r')[0]\n\
+      \n    model_spec.metadata = best_run_parameters\n\n    kpi_acc = float(best_run['f1_score'])\n\
+      \n    kpi.log_metric(\"f1_score\", float(kpi_acc))\n    model_name.log_metric('model',\
+      \ WINNING_MODEL_NAME)\n\n    # subir el df con los resultados al bucket\n  \
+      \  # upload df with results to bucket\n\n    gcsclient = storage.Client() \n\
+      \    bucket = gcsclient.get_bucket(stage_data_bucket)\n\n    blob_hp = bucket.blob(HP_DATA_PATH)\n\
+      \    blob_hp.upload_from_filename(HP_DATA_PATH)\n\n"
     args:
     - --executor_input
     - {executorInput: null}

@@ -16,8 +16,9 @@ from sklearn.model_selection import train_test_split as tts
     
 #NUM_EPOCHS = 5
 
-STAGE_DATA_BUCKET = 'chicago_taxi_stage'
-TRAIN_DATA_PATH = 'chicago_taxi_train.csv'
+STAGE_DATA_BUCKET = 'your_bucket'
+TRAIN_DATA_PATH = 'data/chicago_taxi_train.csv'
+LOCAL_DATA_PATH = 'chicago_taxi_train.csv'
 
 cols = ['trip_month', 'trip_day', 'trip_day_of_week',
        'trip_hour', 'trip_seconds', 'trip_miles', 'euclidean', 'target',
@@ -56,9 +57,9 @@ def create_dataset():
     gcsclient = storage.Client() # tal vez vaya stage_data_bucket
     bucket = gcsclient.get_bucket(STAGE_DATA_BUCKET)
     blob = bucket.blob(TRAIN_DATA_PATH)
-    blob.download_to_filename(TRAIN_DATA_PATH)
+    blob.download_to_filename(LOCAL_DATA_PATH)
 
-    data = pd.read_csv(TRAIN_DATA_PATH, usecols=cols)
+    data = pd.read_csv(LOCAL_DATA_PATH, usecols=cols)
     # data = data.sample(frac = 0.2, random_state = 42)
     train_data, validation_data = tts(data, test_size=0.3)
     return train_data, validation_data
