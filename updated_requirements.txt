@@ -1,0 +1,26 @@
+# Updated requirements.txt - Major Version Updates Available
+# Original versions were from 2021, significant updates available
+
+# Google Cloud Pipeline Components - MAJOR UPDATE AVAILABLE
+# Original: google-cloud-pipeline-components==0.2.0 (from 2021)
+# Latest: google-cloud-pipeline-components==2.20.1 (June 2025)
+google-cloud-pipeline-components==2.20.1
+
+# Kubeflow Pipelines SDK - MAJOR UPDATE AVAILABLE
+# Original: kfp==1.8.9 (from 2021)
+# Latest: kfp==2.14.3 (August 2025)
+kfp==2.14.3
+
+# Scikit-learn - MAJOR UPDATE AVAILABLE
+# Original: scikit-learn==1.0.0 (from 2021)
+# Latest: scikit-learn==1.7.1 (July 2025)
+scikit-learn==1.7.1
+
+# Google Cloud Libraries - Keep latest compatible versions
+google-cloud-bigquery>=3.25.0
+google-cloud-bigquery-storage>=2.25.0
+google-cloud-aiplatform>=1.68.0
+
+# Core Python packages - Updated to latest stable
+pandas>=2.2.0
+numpy>=1.26.0
